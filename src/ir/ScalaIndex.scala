@@ -130,7 +130,7 @@ class ScalaIndex extends Index {
 												scores(docID) = 0
 											}
 											termFrequencies(docID).size
-											scores(postings.docID) += tf / getDocumentSize(docID).toDouble * idf * query.weights(index)
+											scores(docID) += tf / getDocumentSize(docID).toDouble * idf * query.weights(index)
 										}
 							}
 					index += 1
