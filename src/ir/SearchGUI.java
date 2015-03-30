@@ -13,6 +13,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.StringTokenizer;
@@ -84,6 +85,7 @@ public class SearchGUI extends JFrame {
 	JRadioButtonMenuItem intersectionItem = new JRadioButtonMenuItem( "Intersection query" );
 	JRadioButtonMenuItem phraseItem = new JRadioButtonMenuItem( "Phrase query" );
 	JRadioButtonMenuItem rankedItem = new JRadioButtonMenuItem( "Ranked retrieval" );
+	JRadioButtonMenuItem rankedFastItem = new JRadioButtonMenuItem( "Ranked fast" );
 	JRadioButtonMenuItem tfidfItem = new JRadioButtonMenuItem( "tf-idf" );
 	JRadioButtonMenuItem pagerankItem = new JRadioButtonMenuItem( "PageRank" );
 	JRadioButtonMenuItem combinationItem = new JRadioButtonMenuItem( "Combination" );
@@ -105,7 +107,7 @@ public class SearchGUI extends JFrame {
 	 *   Create the GUI.
 	 */
 	private void createGUI() {
-			
+
 		// GUI definition
 		setSize( 600, 650 );
 		setDefaultCloseOperation( JFrame.EXIT_ON_CLOSE );
@@ -122,6 +124,7 @@ public class SearchGUI extends JFrame {
 		optionsMenu.add( intersectionItem );
 		optionsMenu.add( phraseItem );
 		optionsMenu.add( rankedItem );
+		optionsMenu.add(rankedFastItem);
 		rankingMenu.add( tfidfItem ); 
 		rankingMenu.add( pagerankItem ); 
 		rankingMenu.add( combinationItem );
@@ -131,6 +134,7 @@ public class SearchGUI extends JFrame {
 		queries.add( intersectionItem );
 		queries.add( phraseItem );
 		queries.add( rankedItem );
+		queries.add(rankedFastItem);
 		ranking.add( tfidfItem ); 
 		ranking.add( pagerankItem );
 		ranking.add( combinationItem ); 
@@ -167,50 +171,76 @@ public class SearchGUI extends JFrame {
 		// Show the interface
 		setVisible( true );
 
-		Action search = new AbstractAction() {
+		Action search = new AbstractAction() {	
 			public void actionPerformed( ActionEvent e ) {
 				// Normalize the search string and turn it into a Query
 				String queryString = SimpleTokenizer.normalize( queryWindow.getText() );
 				query = new Query( queryString );
+
 				// Search and print results. Access to the index is synchronized since
 				// we don't want to search at the same time we're indexing new files
 				// (this might corrupt the index).
 				synchronized ( indexLock ) {
 					results = indexer.index.search( query, queryType, rankingType, structureType ); 
 				}
-				StringBuffer buf = new StringBuffer();
-//				System.out.println("<h1>" + query + "</h1>");
-				if ( results != null ) {
-					buf.append( "\nFound " + results.size() + " matching document(s)\n\n" );
-					for ( int i=0; i<results.size(); i++ ) {
-						buf.append( " " + i + ". " );
-						String filePath = indexer.index.docIDs.get( "" + results.get(i).docID );
-						String fileName = new File(filePath).getName();
-						int extensionIndex = fileName.indexOf('.');
-						fileName = fileName.substring(0, extensionIndex >= 0 ? extensionIndex : fileName.length());
-						if ( filePath == null ) {
-							buf.append( "" + results.get(i).docID );
-						}
-						else {
-							buf.append( filePath );
-						}
-//						if (i < 20) {
-//						String url = "https://daviswiki.org/" + fileName;
-//						System.out.println("<p>" + fileName + " <a href=\"" + url + "\">Web</a>&nbsp;");
-//						System.out.println(" <a href=\"file://" + filePath + "\">Local</a></p>");
-//						}
+				String htmlFileName = queryString + "_" + (structureType == Index.BIGRAM ? "bi" : "uni") + ".html";
 
-						if ( queryType == Index.RANKED_QUERY ) {
-							buf.append( "   " + String.format( "%.5f", results.get(i).score )); 
+
+				try (PrintWriter writer = new PrintWriter(htmlFileName)) {
+					writer.print("<!doctype html><html><head><style>td { padding: 0 0 15px 15px }</style><meta charset=\"utf-8\"></head><body><h1>" + queryString + "</h1>");
+					StringBuffer buf = new StringBuffer();
+					//				System.out.println("<h1>" + query + "</h1>");
+					
+					
+					writer.print("<table>");
+					if ( results != null ) {
+						buf.append( "\nFound " + results.size() + " matching document(s)\n\n" );
+						for ( int i=0; i<results.size(); i++ ) {
+							writer.print("<tr>");
+							buf.append( " " + i + ". " );
+							String filePath = indexer.index.docIDs.get( "" + results.get(i).docID );
+							String fileName = new File(filePath).getName();
+							int extensionIndex = fileName.indexOf('.');
+							fileName = fileName.substring(0, extensionIndex >= 0 ? extensionIndex : fileName.length());
+							if ( filePath == null ) {
+								buf.append( "" + results.get(i).docID );
+							}
+							else {
+								buf.append( filePath );
+							}
+							if (i < 10) {
+								String url = "https://daviswiki.org/" + fileName;
+								
+								writer.println("<td>" + (i+1) + "</td>");
+								writer.println("<td>" + fileName + "</td>");
+								writer.println("<td>" + String.format( "%.5f", results.get(i).score ) + "</td>");
+								writer.println("<td>" + "<a href=\"" + url + "\">Web</a>" + "</td>");
+								writer.println("<td>" + "<a href=\"file://" + filePath + "\">Local</a>" + "</td>");
+								
+//								writer.println("<p>" + fileName + " " + String.format( "%.5f", results.get(i).score ) + " <a href=\"" + url + "\">Web</a>&nbsp;");
+//								writer.println(" <a href=\"file://" + filePath + "\">Local</a></p>");
+							}
+
+							if ( queryType == Index.RANKED_QUERY || queryType == Index.RANKED_FAST_QUERY) {
+								buf.append( "   " + String.format( "%.5f", results.get(i).score )); 
+							}
+							buf.append( "\n" );
+							writer.print("</tr>");
+
 						}
-						buf.append( "\n" );
 					}
+					else {
+						buf.append( "\nFound 0 matching document(s)\n\n" );
+					}
+					writer.print("</table>");
+
+					writer.print("</body></html>");
+					writer.close();
+					resultWindow.setText( buf.toString() );
+					resultWindow.setCaretPosition( 0 );
+				} catch (IOException e2) {
+					e2.printStackTrace();
 				}
-				else {
-					buf.append( "\nFound 0 matching document(s)\n\n" );
-				}
-				resultWindow.setText( buf.toString() );
-				resultWindow.setCaretPosition( 0 );
 			}
 		};
 		queryWindow.registerKeyboardAction( search,
@@ -222,7 +252,7 @@ public class SearchGUI extends JFrame {
 			public void actionPerformed( ActionEvent e ) {
 				// Check that a ranked search has been made prior to the relevance feedback
 				StringBuffer buf = new StringBuffer();
-				if (( results != null ) && ( queryType == Index.RANKED_QUERY )) {
+				if (( results != null ) && ( queryType == Index.RANKED_QUERY || queryType == Index.RANKED_FAST_QUERY )) {
 					// Read user relevance feedback selections
 
 					boolean[] docIsRelevant = { false, false, false, false, false, false, false, false, false, false }; 
@@ -300,6 +330,10 @@ public class SearchGUI extends JFrame {
 			}
 		};
 		rankedItem.addActionListener( setRankedQuery );
+
+		// This is how the pro's does it
+		rankedFastItem.addActionListener(e -> queryType = Index.RANKED_FAST_QUERY);
+
 
 		Action setTfidfRanking = new AbstractAction() {
 			public void actionPerformed( ActionEvent e ) {
@@ -386,6 +420,9 @@ public class SearchGUI extends JFrame {
 				break;
 			}
 		}
+		String davisWiki = "/Users/Sami/Desktop/lab/davisWiki";
+		String davisWikiSmall = "/Users/Sami/Desktop/lab/davisWikiSmall";
+		dirNames.add(davisWiki);
 	}	    
 
 

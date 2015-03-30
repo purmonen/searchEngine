@@ -14,7 +14,67 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.charset.Charset
 import java.util.HashMap
+import java.util.Collections
 
+class BiwordIndex extends ScalaIndex {
+  var lastToken: String = null
+  var scalaIndex = new ScalaIndex()
+
+  override def insert(token: String, docID: Int, offset: Int) {
+    scalaIndex.insert(token, docID, offset)
+    if (lastToken != null) {
+      super.insert(lastToken + token, docID, offset)
+    }
+    lastToken = token
+  }
+  
+  override def getTermFrequencies(docID: Int): java.util.HashMap[String, Integer] = {
+    if (lastStructureType == Index.BIGRAM) {
+      return super.getTermFrequencies(docID)
+    } else {
+      return scalaIndex.getTermFrequencies(docID)
+    }
+  }
+
+  var lastStructureType = Index.UNIGRAM
+  override def search(query: Query, queryType: Int, rankingType: Int, structureType: Int): PostingsList = {
+    lastStructureType = structureType
+    
+    structureType match {
+      case Index.UNIGRAM => {
+        return scalaIndex.search(query, queryType, rankingType, structureType)
+      }
+      case Index.BIGRAM => {
+        var oldQuery = query.copy()
+        query.terms.clear()
+        query.weights.clear()
+        for (i <- 1 to oldQuery.terms.size-1) {
+          query.addTerm(oldQuery.terms(i-1) + oldQuery.terms(i))
+        }
+        return super.search(query, queryType, rankingType, structureType)
+      }
+      case Index.SUBPHRASE => {
+        val minNumberOfDocuments = 10
+        val uniwordResults =  scalaIndex.search(query, queryType, rankingType, Index.UNIGRAM)
+        val biwordResults = search(query, queryType, rankingType, Index.BIGRAM)
+        if (biwordResults.size() < minNumberOfDocuments) {
+          for (entry <- uniwordResults) {
+            entry.score *= 0.001
+          }
+          val docIDs = biwordResults.map { _.docID }
+          for (entry <- uniwordResults) {
+            if (!docIDs.contains(entry.docID)) {
+              biwordResults.add(entry)
+            }
+          }
+          Collections.sort(biwordResults.list)
+          Collections.reverse(biwordResults.list)
+        }
+        return biwordResults
+      }
+    }
+  }
+}
 
 class ScalaIndex extends Index {
   val index = mutable.HashMap[String, PostingsList]()
@@ -92,8 +152,8 @@ class ScalaIndex extends Index {
         if (!scores.containsKey(postings.docID)) {
           scores(postings.docID) = 0
         }
-        termFrequencies(postings.docID).size
-        scores(postings.docID) += postings.positions.size() / getDocumentSize(postings.docID).toDouble * idf * query.weights(index)
+        
+        scores(postings.docID) += postings.positions.size() / getDocumentSize(postings.docID).toDouble * idf * query.weights(index) * idf
       }
       index += 1
     }
@@ -102,7 +162,7 @@ class ScalaIndex extends Index {
             scores.keySet.toList.sortWith(scores(_) > scores(_)).map(x => new PostingsEntry(x, scores(x))))
   }
 
-  def rankedSearch2(query: Query): PostingsList = {
+  def rankedSearchFast(query: Query): PostingsList = {
     val minimumTermMatches = 2
     val documentMatches = new mutable.HashMap[Int, Int]()
     for (term <- query.terms) {
@@ -113,12 +173,6 @@ class ScalaIndex extends Index {
         documentMatches(docID) += 1
       }
     }
-
-    for ((k,v) <- documentMatches) {
-      println(k + " " + v)
-    }
-
-    println("EY YO")
     val relevantDocuments = documentMatches.filter(_._2 >= minimumTermMatches).map(_._1)
     val scores = mutable.HashMap[Int, Double]()
     var index = 0
@@ -126,13 +180,12 @@ class ScalaIndex extends Index {
     for (term <- query.terms) {
       val idf = Math.log10(getNumberOfDocuments() / getPostings(term).size().toDouble)
       for (docID <- relevantDocuments) {
-        val tf = termFrequencies(docID)(term)
+        val tf = termFrequencies(docID).getOrElse(term, 0)
         if (tf > 0) {
           if (!scores.containsKey(docID)) {
             scores(docID) = 0
           }
-          termFrequencies(docID).size
-          scores(docID) += tf / getDocumentSize(docID).toDouble * idf * query.weights(index)
+          scores(docID) += tf / getDocumentSize(docID).toDouble * idf * idf * query.weights(index)
         }
       }
       index += 1
@@ -142,12 +195,20 @@ class ScalaIndex extends Index {
             scores.keySet.toList.sortWith(scores(_) > scores(_)).map(x => new PostingsEntry(x, scores(x))))
   }
 
+  def time[A](f: => A): A = {
+    val s = System.nanoTime
+    val ret = f
+    println("Time: "+(System.nanoTime-s)/1e6+"ms")
+    return ret
+  }
 
   def search(query: Query, queryType: Int, rankingType: Int, structureType: Int): PostingsList = {
-    return queryType match {
+    return time { queryType match {
       case Index.INTERSECTION_QUERY => intersectionSearch(query)
       case Index.PHRASE_QUERY => phraseSearch(query)
-      case Index.RANKED_QUERY => rankedSearch2(query)
+      case Index.RANKED_QUERY => rankedSearch(query)
+      case Index.RANKED_FAST_QUERY => rankedSearchFast(query)
+    }
     }
   }
 
@@ -190,60 +251,5 @@ class ScalaIndex extends Index {
   def getNumberOfDocuments(): Int = termFrequencies.size
   def cleanup() = {}
   def destroy() = {
-    //    var parseWatch = new StopWatch("Parsing millions of integers")
-    //    var sum = 0
-    //    for (i <- 1 to 8804438) {
-    //      sum += Integer.parseInt("11821")
-    //      if (i % 100000 == 0) {
-    //        println(parseWatch)
-    //      }
-    //    }
-    //    println("Sum " + sum)
-    //    println(parseWatch)
-    //    
-    //    var stopWatch = new StopWatch("Writing index to file")
-    //    var numWords = documentSizes.values.foldLeft(0) {(x,y) => x+y}
-    //    println("Num words " + numWords)
-    //    var stringBuilder = new StringBuilder()
-    //    for ((word, postingsList) <- index) {
-    //      stringBuilder.append(" " + word + "\n")
-    //      for (entry <- postingsList) {
-    //        stringBuilder.append(entry.docID + "\n")
-    //        for (position <- entry.positions) {
-    //          stringBuilder.append(position + " ")
-    //        }
-    //        stringBuilder.append("\n")
-    //      }
-    //    }
-    //    println(stopWatch)
-    //    new PrintWriter(new FileOutputStream("index")).write(stringBuilder.toString())
-    //    println(stopWatch)
-    //    var lines = Files.readAllLines(Paths.get(".", "index"), Charset.forName("utf-8"))
-    //    
-    //    stopWatch = new StopWatch("Reading index from file")
-    //
-    //    var isDocIdLine = true
-    //    var newIndex = mutable.HashMap[String, PostingsList]()
-    //    var lastWord = ""
-    //    for (line <- lines) {
-    //      if (line.charAt(0) == ' ') {
-    //         lastWord = line.trim()
-    //         newIndex(lastWord) = new PostingsList()
-    //      } else {
-    //        if (isDocIdLine) {
-    //          var docId = Integer.parseInt(line)
-    //          newIndex(lastWord).add(new PostingsEntry(docId, 1337))
-    //        } else {
-    //          var positions = newIndex(lastWord).last.positions
-    //          line.trim().split(" ").map(Integer.parseInt).foreach { position => 
-    //            positions.add(position)
-    //          }
-    //        }
-    //        isDocIdLine = !isDocIdLine
-    //      }
-    //    }
-    //    
-
-
   }
 }  

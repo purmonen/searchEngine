@@ -57,7 +57,7 @@ public class Indexer {
 	 *  Initializes the index as a HashedIndex.
 	 */
 	public Indexer() {
-		index = new ScalaIndex();
+		index = new BiwordIndex();
 	}
 
 
