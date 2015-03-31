@@ -45,13 +45,11 @@ class BiwordIndex extends ScalaIndex {
         return scalaIndex.search(query, queryType, rankingType, structureType)
       }
       case Index.BIGRAM => {
-        var oldQuery = query.copy()
-        query.terms.clear()
-        query.weights.clear()
-        for (i <- 1 to oldQuery.terms.size-1) {
-          query.addTerm(oldQuery.terms(i-1) + oldQuery.terms(i))
+        var bigramQuery = new Query()
+        for (i <- 1 to query.terms.size-1) {
+          bigramQuery.addTerm(query.terms(i-1) + query.terms(i))
         }
-        return super.search(query, queryType, rankingType, structureType)
+        return super.search(bigramQuery, queryType, rankingType, structureType)
       }
       case Index.SUBPHRASE => {
         val minNumberOfDocuments = 10
@@ -144,23 +142,21 @@ class ScalaIndex extends Index {
 
 
   def rankedSearch(query: Query): PostingsList = {
-    val scores = mutable.HashMap[Int, Double]()
-    var index = 0
-    for (term <- query.terms) {
-      val idf = Math.log10(getNumberOfDocuments() / getPostings(term).size().toDouble)
+    val scores = new java.util.HashMap[Int, Double]()
+    for ((term, index) <- query.terms.zipWithIndex) {
+      val idf = getIdf(term)
       for (postings <- getPostings(term)) {
         if (!scores.containsKey(postings.docID)) {
           scores(postings.docID) = 0
         }
-        
         scores(postings.docID) += postings.positions.size() / getDocumentSize(postings.docID).toDouble * idf * query.weights(index) * idf
       }
-      index += 1
     }
-
     return new PostingsList(
             scores.keySet.toList.sortWith(scores(_) > scores(_)).map(x => new PostingsEntry(x, scores(x))))
   }
+  
+
 
   def rankedSearchFast(query: Query): PostingsList = {
     val minimumTermMatches = 2
@@ -174,11 +170,10 @@ class ScalaIndex extends Index {
       }
     }
     val relevantDocuments = documentMatches.filter(_._2 >= minimumTermMatches).map(_._1)
+    
     val scores = mutable.HashMap[Int, Double]()
-    var index = 0
-
-    for (term <- query.terms) {
-      val idf = Math.log10(getNumberOfDocuments() / getPostings(term).size().toDouble)
+    for ((term, index) <- query.terms.zipWithIndex) {
+      val idf = getIdf(term)
       for (docID <- relevantDocuments) {
         val tf = termFrequencies(docID).getOrElse(term, 0)
         if (tf > 0) {
@@ -188,12 +183,12 @@ class ScalaIndex extends Index {
           scores(docID) += tf / getDocumentSize(docID).toDouble * idf * idf * query.weights(index)
         }
       }
-      index += 1
     }
-
     return new PostingsList(
             scores.keySet.toList.sortWith(scores(_) > scores(_)).map(x => new PostingsEntry(x, scores(x))))
   }
+  
+  def getIdf(term: String): Double = Math.log10(getNumberOfDocuments() / getPostings(term).size().toDouble)
 
   def time[A](f: => A): A = {
     val s = System.nanoTime
@@ -238,9 +233,6 @@ class ScalaIndex extends Index {
     }
     return hashMap
   }
-
-
-
 
   def getDictionary() = index.keysIterator
   def getPostings(term: String) = if (index.containsKey(term)) index(term) else new PostingsList()

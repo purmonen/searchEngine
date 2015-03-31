@@ -68,8 +68,6 @@ abstract public class BaseIndex implements Index {
 		}
 		return result;
 	}
-	
-
 
 	private PostingsList rankedSearch(Query query) {
 		HashMap<Integer, Double> documentScores = new HashMap<>();

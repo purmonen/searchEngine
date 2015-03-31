@@ -10,8 +10,10 @@ package ir;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.StringTokenizer;
 import java.util.stream.Collectors;
+import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.HashMap;
 
@@ -70,39 +72,51 @@ public class Query {
 			queryVector.put(terms.get(i), weights.get(i));
 		}
 
-		List<Integer> relevantDocuments = IntStream.range(0, 10)
+		int numberOfDocuments = Math.min(results.size(), 10);
+		
+		List<Integer> relevantDocuments = IntStream.range(0, numberOfDocuments)
 				.filter(i -> docIsRelevant[i])
 				.boxed()
 				.map(i -> results.get(i).docID)
 				.collect(Collectors.toList());
 
-		List<Integer> nonRelevantDocuments = IntStream.range(0, 10)
+		List<Integer> nonRelevantDocuments = IntStream.range(0, numberOfDocuments)
 				.filter(i -> !docIsRelevant[i])
 				.boxed()
 				.map(i -> results.get(i).docID)
 				.collect(Collectors.toList());
 
+		
+		double queryLength = queryVector.values().stream().mapToDouble(x -> x).sum();
 		for (String term: queryVector.keySet()) {
-			queryVector.put(term, queryVector.get(term)*a);
+			queryVector.put(term, queryVector.get(term) / queryLength *a);
 		}
-
-
+		
 		for (int docID: relevantDocuments) {
-			HashMap<String, Integer> termFrequencies = indexer.index.getTermFrequencies(docID);
-			for (String term: termFrequencies.keySet()) {
-				queryVector.put(term, b * termFrequencies.get(term) / (double)relevantDocuments.size() + queryVector.getOrDefault(term, 0.0));
+			Map<String, Double> documentVector = normalizedMap(indexer.index.getTermFrequencies(docID));
+			for (String term: documentVector.keySet()) {
+				queryVector.put(term, b * documentVector.get(term) / (double)relevantDocuments.size() + queryVector.getOrDefault(term, 0.0));
 			}
 		}
 
 		for (int docID: nonRelevantDocuments) {
-			HashMap<String, Integer> termFrequencies = indexer.index.getTermFrequencies(docID);
-			for (String term: termFrequencies.keySet()) {
-				queryVector.put(term, -c * termFrequencies.get(term) / (double)nonRelevantDocuments.size() + queryVector.getOrDefault(term, 0.0));
+			Map<String, Double> documentVector = normalizedMap(indexer.index.getTermFrequencies(docID));
+			for (String term: documentVector.keySet()) {
+				queryVector.put(term, -c * documentVector.get(term) / (double)nonRelevantDocuments.size() + queryVector.getOrDefault(term, 0.0));
 			}
 		}
 
 		terms = new LinkedList<String>(queryVector.keySet());
 		weights = new LinkedList<Double>(queryVector.values());
+	}
+	
+	private Map<String, Double> normalizedMap(Map<String, Integer> map) {
+		double mapLength = map.values().stream().mapToDouble(x -> x).sum();
+		HashMap<String, Double> normalizedMap = new HashMap<>();
+		for (String term: map.keySet()) {
+			normalizedMap.put(term, map.get(term) / mapLength);
+		}
+		return normalizedMap;
 	}
 
 	public String toString() {

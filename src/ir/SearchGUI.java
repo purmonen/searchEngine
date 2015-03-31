@@ -196,7 +196,6 @@ public class SearchGUI extends JFrame {
 					if ( results != null ) {
 						buf.append( "\nFound " + results.size() + " matching document(s)\n\n" );
 						for ( int i=0; i<results.size(); i++ ) {
-							writer.print("<tr>");
 							buf.append( " " + i + ". " );
 							String filePath = indexer.index.docIDs.get( "" + results.get(i).docID );
 							String fileName = new File(filePath).getName();
@@ -210,13 +209,14 @@ public class SearchGUI extends JFrame {
 							}
 							if (i < 10) {
 								String url = "https://daviswiki.org/" + fileName;
-								
+								writer.print("<tr>");
+
 								writer.println("<td>" + (i+1) + "</td>");
 								writer.println("<td>" + fileName + "</td>");
 								writer.println("<td>" + String.format( "%.5f", results.get(i).score ) + "</td>");
 								writer.println("<td>" + "<a href=\"" + url + "\">Web</a>" + "</td>");
 								writer.println("<td>" + "<a href=\"file://" + filePath + "\">Local</a>" + "</td>");
-								
+								writer.print("</tr>");
 //								writer.println("<p>" + fileName + " " + String.format( "%.5f", results.get(i).score ) + " <a href=\"" + url + "\">Web</a>&nbsp;");
 //								writer.println(" <a href=\"file://" + filePath + "\">Local</a></p>");
 							}
@@ -225,7 +225,7 @@ public class SearchGUI extends JFrame {
 								buf.append( "   " + String.format( "%.5f", results.get(i).score )); 
 							}
 							buf.append( "\n" );
-							writer.print("</tr>");
+							
 
 						}
 					}
